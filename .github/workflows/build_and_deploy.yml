@@ -114,25 +114,24 @@ jobs:
           (cd release-staging && zip -rq "../serial-terminal-${VERSION}.zip" serial-terminal)
           (cd release-staging && tar czf "../serial-terminal-${VERSION}.tar.gz" serial-terminal)
 
-      - name: Build container image
-        run: |
-          docker build \
-              -t "$GHCR_IMAGE:$VERSION" -t "$GHCR_IMAGE:latest" \
-              -t "$DOCKERHUB_IMAGE:$VERSION" -t "$DOCKERHUB_IMAGE:latest" .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Push container image to GHCR
+      - name: Log in to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
               docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker push "$GHCR_IMAGE:$VERSION"
-          docker push "$GHCR_IMAGE:latest"
 
-      - name: Push container image to Docker Hub
+      - name: Log in to Docker Hub
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
               docker login -u datawaych --password-stdin
-          docker push "$DOCKERHUB_IMAGE:$VERSION"
-          docker push "$DOCKERHUB_IMAGE:latest"
+
+      - name: Build and push container image
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 --push \
+              -t "$GHCR_IMAGE:$VERSION" -t "$GHCR_IMAGE:latest" \
+              -t "$DOCKERHUB_IMAGE:$VERSION" -t "$DOCKERHUB_IMAGE:latest" .
 
       - name: Create GitHub Release
         env:
