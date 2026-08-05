@@ -15,6 +15,9 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
     steps:
     - name: Checkout
       uses: actions/checkout@v6
@@ -28,10 +31,31 @@ jobs:
       run: npm run build
       env:
         CI: true
+    - name: Generate release version
+      id: version
+      run: echo "version=$(date -u +%Y.%m.%d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+    - name: Inject release version into index.html
+      env:
+        RELEASE_VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        node -e "
+          const fs = require('fs');
+          const file = 'dist/index.html';
+          const html = fs.readFileSync(file, 'utf8');
+          const tag = '  <script>window.RELEASE_VERSION = ' +
+              JSON.stringify(process.env.RELEASE_VERSION) + ';</script>\n';
+          fs.writeFileSync(file, html.replace('</head>', tag + '</head>'));
+        "
     - name: Upload artifacts
       if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dataway' }}
       uses: actions/upload-pages-artifact@v5
       with:
+        path: dist/
+    - name: Upload artifacts
+      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dataway' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist
         path: dist/
 
   # Deploy job
@@ -57,3 +81,65 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+  release:
+    needs: build
+
+    if: ${{ github.ref == 'refs/heads/dataway' }}
+
+    permissions:
+      contents: write
+      packages: write
+
+    runs-on: ubuntu-latest
+
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/serial-terminal
+      DOCKERHUB_IMAGE: docker.io/datawaych/serial-terminal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Package release archives
+        run: |
+          mkdir -p release-staging
+          cp -r dist release-staging/serial-terminal
+          (cd release-staging && zip -rq "../serial-terminal-${VERSION}.zip" serial-terminal)
+          (cd release-staging && tar czf "../serial-terminal-${VERSION}.tar.gz" serial-terminal)
+
+      - name: Build container image
+        run: |
+          docker build \
+              -t "$GHCR_IMAGE:$VERSION" -t "$GHCR_IMAGE:latest" \
+              -t "$DOCKERHUB_IMAGE:$VERSION" -t "$DOCKERHUB_IMAGE:latest" .
+
+      - name: Push container image to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+              docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$GHCR_IMAGE:$VERSION"
+          docker push "$GHCR_IMAGE:latest"
+
+      - name: Push container image to Docker Hub
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
+              docker login -u datawaych --password-stdin
+          docker push "$DOCKERHUB_IMAGE:$VERSION"
+          docker push "$DOCKERHUB_IMAGE:latest"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${VERSION}" \
+              "serial-terminal-${VERSION}.zip" \
+              "serial-terminal-${VERSION}.tar.gz" \
+              --title "v${VERSION}" \
+              --notes "Container images: \`${GHCR_IMAGE}:${VERSION}\`, \`${DOCKERHUB_IMAGE}:${VERSION}\`"

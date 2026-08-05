@@ -36,10 +36,13 @@ const google = compat.extends('google').map((config) => {
   return {...config, rules};
 });
 
-// Scope every part of the recommended TS config to `.ts` files so it doesn't
-// leak onto the plain JS config files in this repo.
+// Scope every part of the recommended TS config to TS-family files so it
+// doesn't leak onto the plain JS config files in this repo.
 const typescript = tseslint.configs['flat/recommended'].map(
-    (config) => ({...config, files: config.files ?? ['**/*.ts']}));
+    (config) => ({
+      ...config,
+      files: config.files ?? ['**/*.ts', '**/*.mts', '**/*.cts'],
+    }));
 
 module.exports = [
   js.configs.recommended,
@@ -57,7 +60,7 @@ module.exports = [
     },
   },
   {
-    files: ['*.config.js'],
+    files: ['*.config.js', '*.config.mts', '*.config.cts'],
     languageOptions: {
       globals: {
         ...globals.node,

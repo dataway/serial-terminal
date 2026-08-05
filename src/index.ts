@@ -19,6 +19,12 @@ import {FitAddon} from '@xterm/addon-fit';
 import {WebLinksAddon} from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 
+declare global {
+  interface Window {
+    RELEASE_VERSION?: string;
+  }
+}
+
 let connect9600Button: HTMLButtonElement;
 let connect115200Button: HTMLButtonElement;
 let disconnectButton: HTMLButtonElement;
@@ -130,6 +136,12 @@ function downloadTerminalContents(): void {
  */
 function seedLeadingBlankLine(): void {
   term.writeln('');
+}
+
+function writeVersionBanner(): void {
+  const version = window.RELEASE_VERSION;
+  writeStatusLine(90, '⭐',
+    version ? `serial-terminal ${version}` : 'serial-terminal');
 }
 
 /**
@@ -572,6 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (terminalElement) {
     term.open(terminalElement);
     seedLeadingBlankLine();
+    writeVersionBanner();
     fitTerminal();
 
     window.addEventListener('resize', () => {
