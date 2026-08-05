@@ -22,6 +22,8 @@ import '@xterm/xterm/css/xterm.css';
 let connect9600Button: HTMLButtonElement;
 let connect115200Button: HTMLButtonElement;
 let disconnectButton: HTMLButtonElement;
+let sendBreakButton: HTMLButtonElement;
+let sendBreakWrap: HTMLSpanElement;
 let statusLabel: HTMLSpanElement;
 let dcdSignal: HTMLSpanElement;
 let dsrSignal: HTMLSpanElement;
@@ -39,6 +41,10 @@ let rxBytes = 0;
 let txBytes = 0;
 
 const bufferSize = 8 * 1024; // 8kB
+
+// Add "?breaktest" to URL for the test mode
+const breakTestMode = new URLSearchParams(window.location.search)
+    .has('breaktest');
 
 const term = new Terminal({
   scrollback: 10_000,
@@ -143,15 +149,28 @@ function clearTerminalContents(): void {
   seedLeadingBlankLine();
 }
 
+async function logBreakTestTimestamp(label: string): Promise<void> {
+  const line = `[breaktest] ${label}: ${performance.now().toFixed(3)}ms`;
+  console.log(line);
+  writeStatusLine(36, '🐞', line);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 /**
  * Send an RS232 break lasting 250ms
  */
-function sendRs232Break(): void {
+async function sendRs232Break(): Promise<void> {
   if (!port) {
     return;
   }
   console.log('Start RS232 break');
-  port.setSignals({'break': true});
+  if (breakTestMode) {
+    await logBreakTestTimestamp('before setSignals(break: true)');
+  }
+  await port.setSignals({'break': true});
+  if (breakTestMode) {
+    await logBreakTestTimestamp('after setSignals(break: true)');
+  }
   setTimeout(() => {
     console.log('End RS232 break');
     if (!port) {
@@ -201,6 +220,23 @@ async function selectPort(): Promise<SerialPort | undefined> {
 }
 
 /**
+ * Returns a port's USB vendor/product ID as a lowercase `vvvv:pppp` string,
+ * or undefined if the port isn't a USB device (or the browser won't say).
+ *
+ * @param {SerialPort} port the port to identify
+ * @return {string | undefined} the USB ID, or undefined if unavailable
+ */
+function getUsbId(port: SerialPort): string | undefined {
+  const info = port.getInfo();
+  if (info.usbVendorId === undefined || info.usbProductId === undefined) {
+    return undefined;
+  }
+  const vid = info.usbVendorId.toString(16).padStart(4, '0');
+  const pid = info.usbProductId.toString(16).padStart(4, '0');
+  return `${vid}:${pid}`;
+}
+
+/**
  * Builds a human-readable label for a port from whatever identifying
  * information the browser is willing to share. The Web Serial API does not
  * expose a friendly device name, only its USB vendor/product IDs (when the
@@ -210,13 +246,35 @@ async function selectPort(): Promise<SerialPort | undefined> {
  * @return {string} the port label, or an empty string if none is available
  */
 function describePort(port: SerialPort): string {
-  const info = port.getInfo();
-  if (info.usbVendorId !== undefined && info.usbProductId !== undefined) {
-    const vid = info.usbVendorId.toString(16).padStart(4, '0').toUpperCase();
-    const pid = info.usbProductId.toString(16).padStart(4, '0').toUpperCase();
-    return `USB ${vid}:${pid}`;
+  const usbId = getUsbId(port);
+  return usbId ? `USB ${usbId.toUpperCase()}` : '';
+}
+
+// USB devices tested and verified to handle a break signal correctly on Windows
+const BREAK_SAFE_USB_IDS = new Set([
+  '0403:6001', // FTDI FT232R
+  '067b:2303', // Prolific PL2303
+]);
+
+/**
+ * Returns true if it's safe to offer the "Send break" button for this port.
+ *
+ * On Windows, `usbser.sys` implements a break as a USB CDC `SEND_BREAK`
+ * control request, and some USB-to-serial adapters (observed with a Cisco
+ * console cable, VID:PID 05a6:0009) don't handle that request correctly,
+ * which can hang the entire browser process rather than just the page. This
+ * hasn't been observed on Linux or macOS, so the restriction only applies
+ * on Windows, and only to devices that haven't been verified safe.
+ *
+ * @param {SerialPort} port the connected port
+ * @return {boolean} whether "Send break" should be enabled
+ */
+function isSendBreakSafe(port: SerialPort): boolean {
+  if (breakTestMode || !navigator.userAgent.includes('Windows')) {
+    return true;
   }
-  return '';
+  const usbId = getUsbId(port);
+  return usbId !== undefined && BREAK_SAFE_USB_IDS.has(usbId);
 }
 
 /**
@@ -249,6 +307,8 @@ function markDisconnected(): void {
   connect115200Button.disabled = false;
   connect115200Button.textContent = 'Connect 115200';
   disconnectButton.hidden = true;
+  sendBreakButton.disabled = true;
+  sendBreakWrap.title = '';
   statusLabel.hidden = true;
   statusLabel.textContent = '';
   if (signalPollTimer !== undefined) {
@@ -308,6 +368,17 @@ async function connectToPort(
 
     disconnectButton.hidden = false;
     disconnectButton.disabled = false;
+
+    if (isSendBreakSafe(port)) {
+      sendBreakButton.disabled = false;
+      sendBreakWrap.title = '';
+    } else {
+      sendBreakButton.disabled = true;
+      sendBreakWrap.title = 'Disabled for this device on Windows: some ' +
+          'USB-to-serial adapters (e.g. the Cisco console cable) can ' +
+          'freeze the whole browser when a break signal is sent.';
+    }
+
     signalPollTimer = setInterval(pollSignals, 200);
   } catch (e) {
     console.error(e);
@@ -516,8 +587,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearOutput = document.getElementById('clear') as HTMLSelectElement;
   clearOutput.addEventListener('click', clearTerminalContents);
 
-  const sendBreak = document.getElementById('break') as HTMLSelectElement;
-  sendBreak.addEventListener('click', sendRs232Break);
+  sendBreakWrap = document.getElementById('break-wrap') as HTMLSpanElement;
+  sendBreakButton = document.getElementById('break') as HTMLButtonElement;
+  sendBreakButton.disabled = true;
+  sendBreakButton.addEventListener('click', () => {
+    term.focus();
+    sendRs232Break();
+  });
 
   connect9600Button =
       document.getElementById('connect9600') as HTMLButtonElement;
