@@ -1,36 +1,19 @@
 # Serial Terminal
 
-This repository contains a Progressive Web App that allows the user to
-communicate with a locally connected serial device through an interactive
-terminal. This provides a demonstration of the [Serial
-API](https://wicg.github.io/serial/).
+Demo: https://dataway.github.io/serial-terminal/
 
-This API is available starting with Chrome 89, Edge 89, and Opera 76.
+Original repository: https://github.com/GoogleChromeLabs/serial-terminal
 
-## Privacy
+Adapted by [Anthony Uk](https://anthonyuk.com).
 
-This application is served statically and is cached for offline use. No
-analytics are collected. All communication with the serial device happens
-locally.
+My version simplifies the UI, showing only the options needed by our field staff (Cisco routers).
+Only 9600 and 115200 baud is offered, and connections are always 8-N-1.
 
-## Building
+The terminal responds to the browser window size, doing its best to show at least 80 columns and
+25 rows while maintaining legibility.
 
-This project is written in TypeScript and uses npm and Vite to manage
-dependencies and automate the build process. To get started clone the
-repository and install dependencies by running,
+I also found that under Windows, sending break can cause the entire browser to hang, depending on
+the USB adapter. Therefore the break function is disabled under Windows unless the adapter is
+whitelisted.
 
-```sh
-npm install
-```
-
-To create a production build in the `dist` folder run,
-
-```sh
-npm run build
-```
-
-To start a local development server run,
-
-```sh
-npm run dev
-```
+Browser requirements: Chrome 89, Edge 89, Opera 76, or Firefox 151.
